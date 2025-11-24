@@ -6,10 +6,19 @@ It abandons the traditional Shunting-yard algorithm in favor of **Pratt Parsing*
 
 ## Features
 
-- **🚀 High Performance**: Uses linear bytecode and variable interning (O(1) lookups) for fast evaluation.
-- **🛠 Flexible Syntax**: Powered by a Pratt Parser, easily supporting unary operators, function calls, and operator precedence.
-- **📦 Zero Heavy Dependencies**: Lightweight and easy to audit.
-- **🔒 Safe**: Written in pure safe Rust.
+- **🚀 High Performance**: 
+  - **Linear Bytecode Execution**: Flattens expressions into cache-friendly bytecode for efficient VM execution
+  - **Variable Interning**: O(1) variable lookups using indexed arrays instead of hash-based lookups
+  - **Stack-based VM**: Simple and efficient execution model with excellent instruction cache locality
+  
+- **🛠 Flexible & Extensible Syntax**: 
+  - **Pratt Parsing**: Top-down operator precedence parsing for elegant handling of complex expressions
+  - **Right-associative Operators**: Native support for operators like `^` (exponentiation)
+  - **Unary Operators & Function Calls**: Built-in support for mathematical functions
+  
+- **📦 Zero Heavy Dependencies**: Lightweight core with minimal dependencies, easy to audit and integrate
+- **🔒 Safe**: Written in 100% safe Rust with no unsafe code
+- **🐍 Python Bindings**: High-performance Python interface via PyO3
 
 ## Architecture & References
 
@@ -98,16 +107,3 @@ fn main() {
     println!("Result: {}", result);
 }
 ```
-
-## Performance Comparison (Conceptual)
-
-| Feature | `meval-rs` (Shunting-yard) | `matheval` (This Crate) |
-| :--- | :--- | :--- |
-| **Parsing Algorithm** | Shunting-yard | **Pratt Parsing** (More flexible) |
-| **Execution Model** | RPN + Stack Interpretation | **Linear Bytecode VM** (Cache friendly) |
-| **Variable Lookup** | HashMap (String hashing) | **Index Array** (Direct access) |
-| **Extensibility** | Limited | High |
-
-## License
-
-Apache-2.0
