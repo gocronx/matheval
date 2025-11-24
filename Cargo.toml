@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/matheval-core",
+    "python/matheval-py",
+]
+resolver = "2"
