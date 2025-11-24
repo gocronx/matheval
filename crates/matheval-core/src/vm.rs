@@ -1,26 +1,64 @@
 use crate::bytecode::{OpCode, Program};
-use std::collections::HashMap;
 
+/// Optimized execution context using indexed array for O(1) variable access
+#[derive(Debug, Clone)]
 pub struct Context {
-    vars: HashMap<String, f64>,
+    /// Variable values indexed by their position in Program.var_names
+    values: Vec<f64>,
 }
 
 impl Context {
+    /// Create a new empty context
     pub fn new() -> Self {
         Self {
-            vars: HashMap::new(),
+            values: Vec::new(),
         }
     }
 
-    pub fn set(&mut self, name: &str, value: f64) {
-        self.vars.insert(name.to_string(), value);
+    /// Create a context pre-sized for a specific program
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            values: vec![0.0; capacity],
+        }
     }
 
-    pub fn get(&self, name: &str) -> Option<f64> {
-        self.vars.get(name).cloned()
+    /// Set variable by index (O(1) - recommended for hot paths)
+    pub fn set_by_index(&mut self, index: usize, value: f64) {
+        if index >= self.values.len() {
+            self.values.resize(index + 1, 0.0);
+        }
+        self.values[index] = value;
+    }
+
+    /// Set variable by name (requires program for name lookup)
+    pub fn set(&mut self, name: &str, value: f64, program: &Program) {
+        if let Some(index) = program.var_names.iter().position(|n| n == name) {
+            self.set_by_index(index, value);
+        } else {
+            // Variable not in program, extend context
+            self.values.push(value);
+        }
+    }
+
+    /// Get variable by index
+    pub fn get_by_index(&self, index: usize) -> Option<f64> {
+        self.values.get(index).copied()
+    }
+
+    /// Get variable by name
+    pub fn get(&self, name: &str, program: &Program) -> Option<f64> {
+        program.var_names.iter()
+            .position(|n| n == name)
+            .and_then(|idx| self.get_by_index(idx))
+    }
+
+    /// Get internal values slice
+    pub(crate) fn values(&self) -> &[f64] {
+        &self.values
     }
 }
 
+/// Stack-based virtual machine with optimized instruction dispatch
 pub struct VM<'a> {
     program: &'a Program,
     stack: Vec<f64>,
@@ -35,82 +73,266 @@ impl<'a> VM<'a> {
     }
 
     pub fn run(&mut self, context: &Context) -> Result<f64, String> {
-        // Optimization: Pre-resolve variables to a Vec<f64> based on program.var_names
-        // This makes the inner loop O(1) for variable access.
-        let mut var_values = Vec::with_capacity(self.program.var_names.len());
-        for name in &self.program.var_names {
-            match context.get(name) {
-                Some(v) => var_values.push(v),
-                None => return Err(format!("Undefined variable: {}", name)),
-            }
+        // Ensure context has all required variables
+        if context.values.len() < self.program.var_names.len() {
+            return Err(format!(
+                "Context missing variables: expected {}, got {}",
+                self.program.var_names.len(),
+                context.values.len()
+            ));
         }
 
-        for op in &self.program.ops {
-            match op {
-                OpCode::LoadConst(v) => self.stack.push(*v),
-                OpCode::LoadVar(idx) => {
-                    // Direct index access! Fast!
-                    self.stack.push(var_values[*idx as usize]);
+        let var_values = context.values();
+        let instructions = &self.program.instructions;
+        let constants = &self.program.constants;
+        let func_table = &self.program.func_table;
+
+        let mut pc = 0; // Program counter
+        
+        while pc < instructions.len() {
+            let opcode = instructions[pc];
+            pc += 1;
+
+            match opcode {
+                op if op == OpCode::LoadConst as u8 => {
+                    let idx = self.read_u16(instructions, &mut pc);
+                    self.stack.push(constants[idx as usize]);
                 }
-                OpCode::Add => {
+                op if op == OpCode::LoadVar as u8 => {
+                    let idx = self.read_u16(instructions, &mut pc);
+                    self.stack.push(var_values[idx as usize]);
+                }
+                op if op == OpCode::Add as u8 => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.stack.push(a + b);
                 }
-                OpCode::Sub => {
+                op if op == OpCode::Sub as u8 => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.stack.push(a - b);
                 }
-                OpCode::Mul => {
+                op if op == OpCode::Mul as u8 => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.stack.push(a * b);
                 }
-                OpCode::Div => {
+                op if op == OpCode::Div as u8 => {
                     let b = self.pop()?;
                     let a = self.pop()?;
+                    if b == 0.0 {
+                        return Err("Division by zero".to_string());
+                    }
                     self.stack.push(a / b);
                 }
-                OpCode::Pow => {
+                op if op == OpCode::Pow as u8 => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.stack.push(a.powf(b));
                 }
-                OpCode::Neg => {
+                op if op == OpCode::Neg as u8 => {
                     let a = self.pop()?;
                     self.stack.push(-a);
                 }
-                OpCode::Call(func_idx, arg_count) => {
-                    let func_name = &self.program.func_names[*func_idx as usize];
-                    let mut args = Vec::with_capacity(*arg_count as usize);
-                    for _ in 0..*arg_count {
-                        args.push(self.pop()?);
+                op if op == OpCode::Call as u8 => {
+                    let func_idx = self.read_u16(instructions, &mut pc) as usize;
+                    let arg_count = instructions[pc] as usize;
+                    pc += 1;
+
+                    if func_idx >= func_table.len() {
+                        return Err(format!("Invalid function index: {}", func_idx));
                     }
-                    args.reverse(); // Stack is LIFO, args are pushed left-to-right
+
+                    // Read args directly from stack without allocation
+                    let stack_len = self.stack.len();
+                    if stack_len < arg_count {
+                        return Err("Stack underflow in function call".to_string());
+                    }
                     
-                    let result = self.call_builtin(func_name, &args)?;
+                    let args_start = stack_len - arg_count;
+                    let result = func_table[func_idx](&self.stack[args_start..]);
+                    
+                    // Pop args and push result
+                    self.stack.truncate(args_start);
                     self.stack.push(result);
                 }
+                _ => return Err(format!("Unknown opcode: {}", opcode)),
             }
         }
 
         self.pop()
     }
 
+    #[inline]
+    fn read_u16(&self, instructions: &[u8], pc: &mut usize) -> u16 {
+        let high = instructions[*pc] as u16;
+        let low = instructions[*pc + 1] as u16;
+        *pc += 2;
+        (high << 8) | low
+    }
+
+    #[inline]
     fn pop(&mut self) -> Result<f64, String> {
         self.stack.pop().ok_or_else(|| "Stack underflow".to_string())
     }
+}
 
-    fn call_builtin(&self, name: &str, args: &[f64]) -> Result<f64, String> {
-        match name {
-            "sin" => Ok(args[0].sin()),
-            "cos" => Ok(args[0].cos()),
-            "tan" => Ok(args[0].tan()),
-            "sqrt" => Ok(args[0].sqrt()),
-            "max" => Ok(args.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))),
-            "min" => Ok(args.iter().fold(f64::INFINITY, |a, &b| a.min(b))),
-            _ => Err(format!("Unknown function: {}", name)),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_context_creation() {
+        let ctx = Context::new();
+        assert_eq!(ctx.values.len(), 0);
+
+        let ctx = Context::with_capacity(5);
+        assert_eq!(ctx.values.len(), 5);
+    }
+
+    #[test]
+    fn test_context_set_by_index() {
+        let mut ctx = Context::new();
+        ctx.set_by_index(0, 42.0);
+        ctx.set_by_index(2, 99.0);
+        
+        assert_eq!(ctx.get_by_index(0), Some(42.0));
+        assert_eq!(ctx.get_by_index(1), Some(0.0));
+        assert_eq!(ctx.get_by_index(2), Some(99.0));
+    }
+
+    #[test]
+    fn test_context_with_program() {
+        let mut program = Program::new();
+        program.var_names.push("x".to_string());
+        program.var_names.push("y".to_string());
+
+        let mut ctx = Context::new();
+        ctx.set("x", 10.0, &program);
+        ctx.set("y", 20.0, &program);
+
+        assert_eq!(ctx.get("x", &program), Some(10.0));
+        assert_eq!(ctx.get("y", &program), Some(20.0));
+        assert_eq!(ctx.get("z", &program), None);
+    }
+
+    #[test]
+    fn test_vm_simple_arithmetic() {
+        // Program: 2 + 3
+        let mut program = Program::new();
+        program.constants.push(2.0);
+        program.constants.push(3.0);
+        
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 0]); // const[0]
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 1]); // const[1]
+        program.instructions.push(OpCode::Add as u8);
+
+        let ctx = Context::new();
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx).unwrap();
+        
+        assert_eq!(result, 5.0);
+    }
+
+    #[test]
+    fn test_vm_variable_load() {
+        // Program: x + y
+        let mut program = Program::new();
+        program.var_names.push("x".to_string());
+        program.var_names.push("y".to_string());
+        
+        program.instructions.push(OpCode::LoadVar as u8);
+        program.instructions.extend_from_slice(&[0, 0]); // var[0]
+        program.instructions.push(OpCode::LoadVar as u8);
+        program.instructions.extend_from_slice(&[0, 1]); // var[1]
+        program.instructions.push(OpCode::Add as u8);
+
+        let mut ctx = Context::with_capacity(2);
+        ctx.set_by_index(0, 10.0);
+        ctx.set_by_index(1, 20.0);
+
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx).unwrap();
+        
+        assert_eq!(result, 30.0);
+    }
+
+    #[test]
+    fn test_vm_negation() {
+        // Program: -5
+        let mut program = Program::new();
+        program.constants.push(5.0);
+        
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 0]);
+        program.instructions.push(OpCode::Neg as u8);
+
+        let ctx = Context::new();
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx).unwrap();
+        
+        assert_eq!(result, -5.0);
+    }
+
+    #[test]
+    fn test_vm_division_by_zero() {
+        // Program: 1 / 0
+        let mut program = Program::new();
+        program.constants.push(1.0);
+        program.constants.push(0.0);
+        
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 0]);
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 1]);
+        program.instructions.push(OpCode::Div as u8);
+
+        let ctx = Context::new();
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx);
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Division by zero"));
+    }
+
+    #[test]
+    fn test_vm_function_call() {
+        fn test_max(args: &[f64]) -> f64 {
+            args.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
         }
+
+        // Program: max(2, 5)
+        let mut program = Program::new();
+        program.constants.push(2.0);
+        program.constants.push(5.0);
+        program.func_table.push(test_max);
+        
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 0]);
+        program.instructions.push(OpCode::LoadConst as u8);
+        program.instructions.extend_from_slice(&[0, 1]);
+        program.instructions.push(OpCode::Call as u8);
+        program.instructions.extend_from_slice(&[0, 0]); // func[0]
+        program.instructions.push(2); // 2 args
+
+        let ctx = Context::new();
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx).unwrap();
+        
+        assert_eq!(result, 5.0);
+    }
+
+    #[test]
+    fn test_vm_stack_underflow() {
+        let mut program = Program::new();
+        program.instructions.push(OpCode::Add as u8);
+
+        let ctx = Context::new();
+        let mut vm = VM::new(&program);
+        let result = vm.run(&ctx);
+        
+        assert!(result.is_err());
     }
 }

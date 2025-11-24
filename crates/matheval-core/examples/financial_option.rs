@@ -1,4 +1,4 @@
-use matheval_core::{Compiler, Context};
+use matheval_core::Compiler;
 
 // Option Pricing Model Parameters
 struct OptionParams {
@@ -57,12 +57,15 @@ fn main() {
     let vol_part = params.sigma * params.t.sqrt();
     let s_det = params.s * drift.exp();
 
-    let mut context = Context::new();
-    context.set("K", params.k);
-    context.set("discount", discount);
-    context.set("S_det", s_det);
-    context.set("vol_part", vol_part);
-    context.set("E", std::f64::consts::E);
+    let mut context = program.create_context();
+    // Use indexed access for best performance in hot loop
+    // Variable order: discount, E, K, S_det, vol_part, Z
+    context.set_by_index(0, discount);
+    context.set_by_index(1, std::f64::consts::E);
+    context.set_by_index(2, params.k);
+    context.set_by_index(3, s_det);
+    context.set_by_index(4, vol_part);
+    // Z will be set in the loop
 
     // 3. Run Simulation
     let simulations = 100_000;
@@ -95,7 +98,7 @@ fn main() {
     
     for _ in 0..simulations {
         let z = rng.next_normal();
-        context.set("Z", z);
+        context.set_by_index(5, z); // Z
         
         let payoff = program.eval(&context).unwrap();
         total_payoff += payoff;

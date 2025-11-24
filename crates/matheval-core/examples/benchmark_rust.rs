@@ -1,4 +1,4 @@
-use matheval_core::{Compiler, Context};
+use matheval_core::Compiler;
 use std::time::Instant;
 
 // Simple Xorshift for fair comparison (avoiding heavy rand crate dependency overhead in benchmark)
@@ -41,12 +41,13 @@ fn main() {
     let compiler = Compiler::new();
     let program = compiler.compile(formula).expect("Compile failed");
 
-    let mut context = Context::new();
-    context.set("K", k);
-    context.set("discount", discount);
-    context.set("S_det", s_det);
-    context.set("vol_part", vol_part);
-    context.set("E", std::f64::consts::E);
+    let mut context = program.create_context();
+    // Use indexed access for maximum performance
+    context.set_by_index(0, discount);
+    context.set_by_index(1, std::f64::consts::E);
+    context.set_by_index(2, k);
+    context.set_by_index(3, s_det);
+    context.set_by_index(4, vol_part);
 
     let iterations = 1_000_000;
     let mut rng = Xorshift { state: 123456789 };
@@ -57,7 +58,7 @@ fn main() {
     
     for _ in 0..iterations {
         let z = rng.next_normal();
-        context.set("Z", z);
+        context.set_by_index(5, z); // Z
         
         // VM Execution
         let res = program.eval(&context).unwrap();

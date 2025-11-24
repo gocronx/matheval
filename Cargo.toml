@@ -3,4 +3,6 @@ members = [
     "crates/matheval-core",
     "python/matheval-py",
 ]
+# Exclude Python bindings from default cargo test to avoid Python linking issues
+default-members = ["crates/matheval-core"]
 resolver = "2"

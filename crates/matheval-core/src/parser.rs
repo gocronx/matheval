@@ -120,3 +120,163 @@ impl<'a> Parser<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(input: &str) -> Result<Expr, String> {
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer)?;
+        parser.parse()
+    }
+
+    #[test]
+    fn test_parse_number() {
+        let expr = parse("42").unwrap();
+        assert_eq!(expr, Expr::Number(42.0));
+    }
+
+    #[test]
+    fn test_parse_variable() {
+        let expr = parse("x").unwrap();
+        assert_eq!(expr, Expr::Variable("x".to_string()));
+    }
+
+    #[test]
+    fn test_parse_addition() {
+        let expr = parse("1 + 2").unwrap();
+        assert!(matches!(expr, Expr::Binary { op: BinaryOp::Add, .. }));
+    }
+
+    #[test]
+    fn test_parse_precedence() {
+        // 2 + 3 * 4 should parse as 2 + (3 * 4)
+        let expr = parse("2 + 3 * 4").unwrap();
+        
+        if let Expr::Binary { op: BinaryOp::Add, left, right } = expr {
+            assert_eq!(*left, Expr::Number(2.0));
+            assert!(matches!(*right, Expr::Binary { op: BinaryOp::Mul, .. }));
+        } else {
+            panic!("Expected Add at top level");
+        }
+    }
+
+    #[test]
+    fn test_parse_right_associativity() {
+        // 2 ^ 3 ^ 4 should parse as 2 ^ (3 ^ 4)
+        let expr = parse("2 ^ 3 ^ 4").unwrap();
+        
+        if let Expr::Binary { op: BinaryOp::Pow, left, right } = expr {
+            assert_eq!(*left, Expr::Number(2.0));
+            assert!(matches!(*right, Expr::Binary { op: BinaryOp::Pow, .. }));
+        } else {
+            panic!("Expected Pow at top level");
+        }
+    }
+
+    #[test]
+    fn test_parse_parentheses() {
+        // (2 + 3) * 4 should parse as (2 + 3) * 4
+        let expr = parse("(2 + 3) * 4").unwrap();
+        
+        if let Expr::Binary { op: BinaryOp::Mul, left, right } = expr {
+            assert!(matches!(*left, Expr::Binary { op: BinaryOp::Add, .. }));
+            assert_eq!(*right, Expr::Number(4.0));
+        } else {
+            panic!("Expected Mul at top level");
+        }
+    }
+
+    #[test]
+    fn test_parse_negation() {
+        let expr = parse("-5").unwrap();
+        assert!(matches!(expr, Expr::Unary { op: UnaryOp::Neg, .. }));
+    }
+
+    #[test]
+    fn test_parse_function_call() {
+        let expr = parse("sin(x)").unwrap();
+        
+        if let Expr::Call { func, args } = expr {
+            assert_eq!(func, "sin");
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0], Expr::Variable("x".to_string()));
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_multiple_args() {
+        let expr = parse("max(1, 2, 3)").unwrap();
+        
+        if let Expr::Call { func, args } = expr {
+            assert_eq!(func, "max");
+            assert_eq!(args.len(), 3);
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_function_no_args() {
+        let expr = parse("rand()").unwrap();
+        
+        if let Expr::Call { func, args } = expr {
+            assert_eq!(func, "rand");
+            assert_eq!(args.len(), 0);
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_complex_expression() {
+        let expr = parse("x + 2 * sin(y) - 3").unwrap();
+        assert!(matches!(expr, Expr::Binary { .. }));
+    }
+
+    #[test]
+    fn test_parse_nested_functions() {
+        let expr = parse("sin(cos(x))").unwrap();
+        
+        if let Expr::Call { func, args } = expr {
+            assert_eq!(func, "sin");
+            assert!(matches!(args[0], Expr::Call { .. }));
+        } else {
+            panic!("Expected Call expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_error_missing_rparen() {
+        let result = parse("(1 + 2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_error_missing_function_rparen() {
+        let result = parse("sin(x");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_all_operators() {
+        assert!(parse("1 + 2").is_ok());
+        assert!(parse("1 - 2").is_ok());
+        assert!(parse("1 * 2").is_ok());
+        assert!(parse("1 / 2").is_ok());
+        assert!(parse("1 ^ 2").is_ok());
+    }
+
+    #[test]
+    fn test_parse_whitespace_insensitive() {
+        let expr1 = parse("1+2").unwrap();
+        let expr2 = parse("1 + 2").unwrap();
+        let expr3 = parse("  1  +  2  ").unwrap();
+        
+        assert_eq!(expr1, expr2);
+        assert_eq!(expr2, expr3);
+    }
+}

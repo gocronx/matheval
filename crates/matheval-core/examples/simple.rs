@@ -1,4 +1,4 @@
-use matheval_core::{Compiler, Context};
+use matheval_core::Compiler;
 
 fn main() {
     println!("=== Simple Usage Example ===");
@@ -11,10 +11,12 @@ fn main() {
     let compiler = Compiler::new();
     let program = compiler.compile(expr).expect("Failed to compile");
 
-    // 3. Create a context with variables
-    let mut context = Context::new();
-    context.set("x", 10.0);
-    context.set("y", 5.0);
+    // 3. Create a context optimized for this program
+    let mut context = program.create_context();
+    
+    // Use indexed access for best performance (O(1))
+    context.set_by_index(0, 10.0); // x
+    context.set_by_index(1, 5.0);  // y
     println!("Context: x = 10.0, y = 5.0");
 
     // 4. Evaluate

@@ -4,12 +4,17 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
 name = "matheval"
-crate-type = ["cdylib"]
+# cdylib for Python extension, rlib for Rust tests
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.21", features = ["extension-module"] }
+# Don't use extension-module by default to allow testing without Python
+pyo3 = { version = "0.21" }
 matheval-core = { path = "../../crates/matheval-core" }
+
+[features]
+# Use this feature when building the Python extension
+default = []
+extension-module = ["pyo3/extension-module"]
