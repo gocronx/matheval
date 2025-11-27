@@ -16,5 +16,5 @@ matheval-core = { path = "../../crates/matheval-core" }
 
 [features]
 # Use this feature when building the Python extension
-default = []
 extension-module = ["pyo3/extension-module"]
+default = ["extension-module"]
