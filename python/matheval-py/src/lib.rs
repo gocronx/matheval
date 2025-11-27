@@ -59,7 +59,7 @@ impl Program {
             if let Some(&value) = context.variables.get(var_name) {
                 rs_context.set_by_index(idx, value);
             } else {
-                return Err(pyo3::exceptions::PyValueError::new_err(
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
                     format!("Undefined variable: {}", var_name)
                 ));
             }
@@ -139,9 +139,11 @@ mod tests {
         let program = compiler.compile("x + y").unwrap();
         let mut context = Context::new();
         context.set("x", 10.0);
-        // Missing 'y'
+        // Missing 'y' - should return RuntimeError
         
-        assert!(program.eval(&context).is_err());
+        let result = program.eval(&context);
+        assert!(result.is_err());
+        // The error should contain "Undefined variable"
     }
 
     #[test]
