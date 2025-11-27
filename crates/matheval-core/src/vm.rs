@@ -175,6 +175,124 @@ impl<'a> VM<'a> {
     fn pop(&mut self) -> Result<f64, String> {
         self.stack.pop().ok_or_else(|| "Stack underflow".to_string())
     }
+
+    /// Batch evaluation: evaluate the same program with multiple variable sets
+    /// This is much more efficient than calling eval() in a loop
+    /// 
+    /// # Arguments
+    /// * `var_sets` - A slice where each inner slice contains variable values for one evaluation
+    ///                Each inner slice must have length equal to program.var_names.len()
+    /// 
+    /// # Returns
+    /// A vector of results, one for each variable set
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let program = compiler.compile("x * 2 + y").unwrap();
+    /// let var_sets = vec![
+    ///     vec![1.0, 2.0],  // x=1, y=2 -> result: 4
+    ///     vec![3.0, 4.0],  // x=3, y=4 -> result: 10
+    ///     vec![5.0, 6.0],  // x=5, y=6 -> result: 16
+    /// ];
+    /// let results = program.eval_batch(&var_sets).unwrap();
+    /// ```
+    pub fn run_batch(&mut self, var_sets: &[&[f64]]) -> Result<Vec<f64>, String> {
+        let expected_var_count = self.program.var_names.len();
+        let mut results = Vec::with_capacity(var_sets.len());
+
+        for (i, var_values) in var_sets.iter().enumerate() {
+            if var_values.len() != expected_var_count {
+                return Err(format!(
+                    "Variable set {} has {} values, expected {}",
+                    i,
+                    var_values.len(),
+                    expected_var_count
+                ));
+            }
+
+            // Reset stack for each evaluation
+            self.stack.clear();
+
+            let instructions = &self.program.instructions;
+            let constants = &self.program.constants;
+            let func_table = &self.program.func_table;
+
+            let mut pc = 0;
+
+            while pc < instructions.len() {
+                let opcode = instructions[pc];
+                pc += 1;
+
+                match opcode {
+                    op if op == OpCode::LoadConst as u8 => {
+                        let idx = self.read_u16(instructions, &mut pc);
+                        self.stack.push(constants[idx as usize]);
+                    }
+                    op if op == OpCode::LoadVar as u8 => {
+                        let idx = self.read_u16(instructions, &mut pc);
+                        self.stack.push(var_values[idx as usize]);
+                    }
+                    op if op == OpCode::Add as u8 => {
+                        let b = self.pop()?;
+                        let a = self.pop()?;
+                        self.stack.push(a + b);
+                    }
+                    op if op == OpCode::Sub as u8 => {
+                        let b = self.pop()?;
+                        let a = self.pop()?;
+                        self.stack.push(a - b);
+                    }
+                    op if op == OpCode::Mul as u8 => {
+                        let b = self.pop()?;
+                        let a = self.pop()?;
+                        self.stack.push(a * b);
+                    }
+                    op if op == OpCode::Div as u8 => {
+                        let b = self.pop()?;
+                        let a = self.pop()?;
+                        if b == 0.0 {
+                            return Err("Division by zero".to_string());
+                        }
+                        self.stack.push(a / b);
+                    }
+                    op if op == OpCode::Pow as u8 => {
+                        let b = self.pop()?;
+                        let a = self.pop()?;
+                        self.stack.push(a.powf(b));
+                    }
+                    op if op == OpCode::Neg as u8 => {
+                        let a = self.pop()?;
+                        self.stack.push(-a);
+                    }
+                    op if op == OpCode::Call as u8 => {
+                        let func_idx = self.read_u16(instructions, &mut pc) as usize;
+                        let arg_count = instructions[pc] as usize;
+                        pc += 1;
+
+                        if func_idx >= func_table.len() {
+                            return Err(format!("Invalid function index: {}", func_idx));
+                        }
+
+                        let stack_len = self.stack.len();
+                        if stack_len < arg_count {
+                            return Err("Stack underflow in function call".to_string());
+                        }
+
+                        let args_start = stack_len - arg_count;
+                        let result = func_table[func_idx](&self.stack[args_start..]);
+
+                        self.stack.truncate(args_start);
+                        self.stack.push(result);
+                    }
+                    _ => return Err(format!("Unknown opcode: {}", opcode)),
+                }
+            }
+
+            results.push(self.pop()?);
+        }
+
+        Ok(results)
+    }
 }
 
 #[cfg(test)]

@@ -46,6 +46,42 @@ impl Program {
         vm.run(context)
     }
 
+    /// Batch evaluation: evaluate with multiple variable sets efficiently
+    /// 
+    /// This is significantly faster than calling `eval()` in a loop because:
+    /// - Reuses the same VM instance
+    /// - Avoids repeated context creation
+    /// - Better cache locality
+    /// 
+    /// # Arguments
+    /// * `var_sets` - Slice of variable value slices. Each inner slice must contain
+    ///                values in the same order as `program.var_names`
+    /// 
+    /// # Returns
+    /// Vector of results, one for each variable set
+    /// 
+    /// # Example
+    /// ```
+    /// use matheval_core::Compiler;
+    /// 
+    /// let compiler = Compiler::new();
+    /// let program = compiler.compile("x * 2 + y").unwrap();
+    /// 
+    /// // Batch evaluate with 3 different variable sets
+    /// let var_sets: Vec<&[f64]> = vec![
+    ///     &[1.0, 2.0],  // x=1, y=2 -> result: 4
+    ///     &[3.0, 4.0],  // x=3, y=4 -> result: 10
+    ///     &[5.0, 6.0],  // x=5, y=6 -> result: 16
+    /// ];
+    /// 
+    /// let results = program.eval_batch(&var_sets).unwrap();
+    /// assert_eq!(results, vec![4.0, 10.0, 16.0]);
+    /// ```
+    pub fn eval_batch(&self, var_sets: &[&[f64]]) -> Result<Vec<f64>, String> {
+        let mut vm = VM::new(self);
+        vm.run_batch(var_sets)
+    }
+
     /// Create a context pre-sized for this program
     pub fn create_context(&self) -> Context {
         Context::with_capacity(self.var_names.len())
@@ -220,5 +256,93 @@ mod tests {
         let mut ctx2 = program.create_context();
         ctx2.set_by_index(0, 10.0);
         assert_eq!(program.eval(&ctx2).unwrap(), 20.0);
+    }
+
+    #[test]
+    fn test_eval_batch_basic() {
+        let compiler = Compiler::new();
+        let program = compiler.compile("x * 2 + y").unwrap();
+        
+        let var_sets: Vec<&[f64]> = vec![
+            &[1.0, 2.0],  // x=1, y=2 -> 1*2+2 = 4
+            &[3.0, 4.0],  // x=3, y=4 -> 3*2+4 = 10
+            &[5.0, 6.0],  // x=5, y=6 -> 5*2+6 = 16
+        ];
+        
+        let results = program.eval_batch(&var_sets).unwrap();
+        assert_eq!(results, vec![4.0, 10.0, 16.0]);
+    }
+
+    #[test]
+    fn test_eval_batch_with_functions() {
+        let compiler = Compiler::new();
+        let program = compiler.compile("sin(x) + cos(y)").unwrap();
+        
+        let var_sets: Vec<&[f64]> = vec![
+            &[0.0, 0.0],
+            &[std::f64::consts::PI / 2.0, 0.0],
+        ];
+        
+        let results = program.eval_batch(&var_sets).unwrap();
+        assert!((results[0] - 1.0).abs() < 1e-10);  // sin(0) + cos(0) = 1
+        assert!((results[1] - 2.0).abs() < 1e-6);   // sin(π/2) + cos(0) = 1 + 1 = 2
+    }
+
+    #[test]
+    fn test_eval_batch_empty() {
+        let compiler = Compiler::new();
+        let program = compiler.compile("x + y").unwrap();
+        
+        let var_sets: Vec<&[f64]> = vec![];
+        let results = program.eval_batch(&var_sets).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_eval_batch_wrong_var_count() {
+        let compiler = Compiler::new();
+        let program = compiler.compile("x + y").unwrap();  // Expects 2 variables
+        
+        let var_sets: Vec<&[f64]> = vec![
+            &[1.0],  // Only 1 variable - should error
+        ];
+        
+        let result = program.eval_batch(&var_sets);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 2"));
+    }
+
+    #[test]
+    fn test_eval_batch_monte_carlo_simulation() {
+        // Simulate simplified option pricing
+        let compiler = Compiler::new();
+        let program = compiler.compile("max(S - K, 0) * discount").unwrap();
+        
+        // Variables are ordered by first appearance: S, K, discount
+        
+        // Prepare parameters
+        let k = 105.0;
+        let discount = 0.95;
+        
+        // Different stock prices
+        let s_values = vec![90.0, 100.0, 110.0, 120.0, 130.0];
+        let var_sets: Vec<Vec<f64>> = s_values.iter().map(|&s| {
+            vec![s, k, discount]  // S, K, discount (order of first appearance)
+        }).collect();
+        let var_sets_refs: Vec<&[f64]> = var_sets.iter().map(|v| v.as_slice()).collect();
+        
+        let results = program.eval_batch(&var_sets_refs).unwrap();
+        
+        // All results should be non-negative (option payoff)
+        for result in &results {
+            assert!(*result >= 0.0);
+        }
+        
+        // Results: max(S-K, 0) * discount for each S value
+        assert_eq!(results[0], 0.0);     // max(90-105, 0) * 0.95 = 0
+        assert_eq!(results[1], 0.0);     // max(100-105, 0) * 0.95 = 0  
+        assert!((results[2] - 4.75).abs() < 0.01);  // max(110-105, 0) * 0.95 = 4.75
+        assert!((results[3] - 14.25).abs() < 0.01); // max(120-105, 0) * 0.95 = 14.25
+        assert!((results[4] - 23.75).abs() < 0.01); // max(130-105, 0) * 0.95 = 23.75
     }
 }

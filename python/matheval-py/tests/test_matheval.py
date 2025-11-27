@@ -96,5 +96,40 @@ def test_complex_expression():
     assert abs(result - 3.0) < 0.0001
 
 
+def test_eval_batch():
+    """Test batch evaluation"""
+    compiler = matheval.Compiler()
+    program = compiler.compile("x * 2 + y")
+    
+    # Check variable order (alphabetical or first appearance depending on implementation)
+    # In Rust implementation it's first appearance: x, y
+    var_names = program.var_names
+    assert "x" in var_names
+    assert "y" in var_names
+    
+    # Prepare variable sets
+    # x=1, y=2 -> 4
+    # x=3, y=4 -> 10
+    # x=5, y=6 -> 16
+    var_sets = [
+        [1.0, 2.0],
+        [3.0, 4.0],
+        [5.0, 6.0]
+    ]
+    
+    results = program.eval_batch(var_sets)
+    assert len(results) == 3
+    assert results[0] == 4.0
+    assert results[1] == 10.0
+    assert results[2] == 16.0
+
+    # Test with empty list
+    assert program.eval_batch([]) == []
+
+    # Test error handling (wrong number of variables)
+    with pytest.raises(RuntimeError):
+        program.eval_batch([[1.0]])  # Missing y
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

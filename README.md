@@ -10,31 +10,27 @@ It abandons the traditional Shunting-yard algorithm in favor of **Pratt Parsing*
   - **Linear Bytecode Execution**: Flattens expressions into cache-friendly bytecode for efficient VM execution
   - **Variable Interning**: O(1) variable lookups using indexed arrays instead of hash-based lookups
   - **Stack-based VM**: Simple and efficient execution model with excellent instruction cache locality
-  
 - **🛠 Flexible & Extensible Syntax**: 
   - **Pratt Parsing**: Top-down operator precedence parsing for elegant handling of complex expressions
   - **Right-associative Operators**: Native support for operators like `^` (exponentiation)
   - **Unary Operators & Function Calls**: Built-in support for mathematical functions
   
-- **📦 Zero Heavy Dependencies**: Lightweight core with minimal dependencies, easy to audit and integrate
+- **📦 Zero Heavy Dependencies**: Lightweight core with minimal dependencies
 - **🔒 Safe**: Written in 100% safe Rust with no unsafe code
+- **🚀 Fast**: Stack-based VM, O(1) variable access, constant folding
+- **⚡️ Batch Evaluation**: Optimized API for bulk calculations (e.g., Monte Carlo)
 - **🐍 Python Bindings**: High-performance Python interface via PyO3
+  
 
 ## Architecture & References
 
-This project implements algorithms described in seminal computer science papers:
+This project implements a **Pratt Parser** (Top-Down Operator Precedence Parser) which is ideal for mathematical expressions. The parser produces an AST which is then compiled into bytecode for a custom **Stack-based Virtual Machine**.
 
-*   **Parsing Algorithm**:
-    *   **Pratt Parsing (Top-Down Operator Precedence)**:
-        *   Pratt, V. R. (1973). "Top down operator precedence". *Proceedings of the 1st Annual ACM SIGACT-SIGPLAN Symposium on Principles of Programming Languages (POPL '73)*.
-        *   [Paper Link (ACM)](https://dl.acm.org/doi/10.1145/512927.512931) | [Archived PDF](https://tdop.github.io/)
-        *   *Why we use it*: It allows for a highly extensible parser that handles operator precedence and associativity (including right-associative operators like `^`) more elegantly than the traditional Shunting-yard algorithm.
-
-*   **Execution Model**:
-    *   **Stack-based Virtual Machine**:
-        *   Koopman, P. (1989). *Stack Computers: the new wave*.
-        *   [Book Link (CMU)](https://users.ece.cmu.edu/~koopman/stack_computers/)
-        *   *Why we use it*: Stack machines provide a simple yet efficient execution model. By flattening the AST into a linear sequence of instructions (bytecode), we improve instruction cache locality compared to tree-walking interpreters.
+Key optimizations include:
+- **Indexed Variable Access**: Variables are resolved to indices at compile time for O(1) access.
+- **Compact Bytecode**: Instructions are compressed to 1 byte for better cache locality.
+- **Constant Folding**: Arithmetic on constants is evaluated at compile time.
+- **Batch Evaluation**: Reuses VM resources for high-throughput bulk processing.
 
 ### System Architecture
 

@@ -70,6 +70,35 @@ impl Program {
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
         }
     }
+
+    /// Batch evaluation: evaluate with multiple variable sets efficiently
+    /// 
+    /// This is much faster than calling eval() in a loop for large datasets.
+    /// 
+    /// Args:
+    ///     var_sets: List of lists, where each inner list contains variable values
+    ///               in the same order as program.var_names
+    /// 
+    /// Returns:
+    ///     List of results, one for each variable set
+    /// 
+    /// Example:
+    ///     >>> compiler = matheval.Compiler()
+    ///     >>> program = compiler.compile("x * 2 + y")
+    ///     >>> var_sets = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
+    ///     >>> results = program.eval_batch(var_sets)
+    ///     >>> print(results)  # [4.0, 10.0, 16.0]
+    fn eval_batch(&self, var_sets: Vec<Vec<f64>>) -> PyResult<Vec<f64>> {
+        // Convert Vec<Vec<f64>> to Vec<&[f64]>
+        let var_sets_refs: Vec<&[f64]> = var_sets.iter()
+            .map(|v| v.as_slice())
+            .collect();
+        
+        match self.inner.eval_batch(&var_sets_refs) {
+            Ok(results) => Ok(results),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(e)),
+        }
+    }
     
     #[getter]
     fn var_names(&self) -> Vec<String> {
