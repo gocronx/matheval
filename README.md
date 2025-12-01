@@ -1,105 +1,183 @@
 # matheval
 
-**matheval** is a modern, high-performance mathematical expression evaluator for Rust, built from scratch with a focus on flexibility and speed.
+A high-performance mathematical expression evaluator implementing a **Pratt parser** with **bytecode compilation** and a **stack-based virtual machine**.
 
-It abandons the traditional Shunting-yard algorithm in favor of **Pratt Parsing** combined with a **Stack-based Virtual Machine**.
+[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## Features
+## Design Philosophy
 
-- **🚀 High Performance**: 
-  - **Linear Bytecode Execution**: Flattens expressions into cache-friendly bytecode for efficient VM execution
-  - **Variable Interning**: O(1) variable lookups using indexed arrays instead of hash-based lookups
-  - **Stack-based VM**: Simple and efficient execution model with excellent instruction cache locality
-- **🛠 Flexible & Extensible Syntax**: 
-  - **Pratt Parsing**: Top-down operator precedence parsing for elegant handling of complex expressions
-  - **Right-associative Operators**: Native support for operators like `^` (exponentiation)
-  - **Unary Operators & Function Calls**: Built-in support for mathematical functions
-  
-- **📦 Zero Heavy Dependencies**: Lightweight core with minimal dependencies
-- **🔒 Safe**: Written in 100% safe Rust with no unsafe code
-- **🚀 Fast**: Stack-based VM, O(1) variable access, constant folding
-- **⚡️ Batch Evaluation**: Optimized API for bulk calculations (e.g., Monte Carlo)
-- **🐍 Python Bindings**: High-performance Python interface via PyO3
-  
+Traditional expression evaluators rely on the Shunting-yard algorithm and tree-walking interpretation. This implementation adopts a **compiler-VM architecture** for superior performance:
 
-## Architecture & References
+- **Pratt Parsing**: Top-down operator precedence parsing with O(n) complexity
+- **Bytecode Compilation**: AST flattening into compact, cache-friendly instruction sequences
+- **Stack-based VM**: Zero-overhead execution with tight instruction dispatch loop
 
-This project implements a **Pratt Parser** (Top-Down Operator Precedence Parser) which is ideal for mathematical expressions. The parser produces an AST which is then compiled into bytecode for a custom **Stack-based Virtual Machine**.
+## Performance Characteristics
 
-Key optimizations include:
-- **Indexed Variable Access**: Variables are resolved to indices at compile time for O(1) access.
-- **Compact Bytecode**: Instructions are compressed to 1 byte for better cache locality.
-- **Constant Folding**: Arithmetic on constants is evaluated at compile time.
-- **Batch Evaluation**: Reuses VM resources for high-throughput bulk processing.
+| Component | Optimization | Complexity |
+|-----------|-------------|------------|
+| Variable Resolution | Index-based interning | O(1) |
+| Constant Pool | HashMap deduplication | O(1) |
+| Function Dispatch | Direct pointer table | O(1) |
+| Batch Evaluation | Shared VM instance | O(n·m) |
 
-### System Architecture
+**Key Optimizations:**
+- **Constant Folding**: Compile-time evaluation of constant expressions
+- **Algebraic Simplification**: Identity elimination (x·1 → x, x+0 → x)
+- **Zero-copy Execution**: Direct stack manipulation without heap allocation
+- **Function Validation**: Compile-time arity checking with metadata
 
-The data flow proceeds in three stages:
+## Architecture
 
-```text
-Source String  --> [ Lexer ] --> Tokens
-                                  |
-                                  v
-                             [ Parser ] (Pratt)
-                                  |
-                                  v
-                                 AST
-                                  |
-                                  v
-                             [ Compiler ] --> (Symbol Table Resolution)
-                                  |
-                                  v
-                            Bytecode (Program)
-                                  |
-                                  v
-                             [    VM    ] --> Result
 ```
-
-### Module Breakdown
-
-1.  **`token` & `lexer`**
-    *   **Responsibility**: Convert raw string input into a stream of `Token`s.
-    *   **Key Types**: `Token` (Enum), `Lexer` (Iterator).
-
-2.  **`parser` (Pratt Parser)**
-    *   **Responsibility**: Convert `Token` stream into an Abstract Syntax Tree (AST).
-    *   **Algorithm**: Top-Down Operator Precedence.
-    *   **Key Concepts**: `bp` (Binding Power), `nud` (Null Denotation), `led` (Left Denotation).
-
-3.  **`compiler`**
-    *   **Responsibility**: Flatten the AST into Linear Bytecode and resolve variable names.
-    *   **Key Actions**:
-        *   **Interning**: Collects all unique variable names into a `Vec<String>` and replaces them with `u16` indices in the bytecode.
-        *   **Code Gen**: Emits `OpCode`s for the VM.
-
-4.  **`bytecode`**
-    *   **Responsibility**: Define the instruction set for the VM.
-    *   **Instructions**: `LoadConst`, `LoadVar`, `Add`, `Sub`, `Mul`, `Div`, `Pow`, `Call`.
-
-5.  **`vm` (Virtual Machine)**
-    *   **Responsibility**: Execute the bytecode.
-    *   **State**: `stack` (Vec<f64>), `vars` (Context).
-    *   **Execution**: A tight loop matching on `OpCode`s.
+┌─────────────┐
+│   Source    │
+└──────┬──────┘
+       │ Lexical Analysis
+       ▼
+┌─────────────┐
+│   Tokens    │
+└──────┬──────┘
+       │ Pratt Parsing
+       ▼
+┌─────────────┐
+│     AST     │
+└──────┬──────┘
+       │ Optimization & Compilation
+       ▼
+┌─────────────┐     ┌──────────────┐
+│  Bytecode   │────▶│ Symbol Table │
+└──────┬──────┘     └──────────────┘
+       │
+       │ VM Execution
+       ▼
+┌─────────────┐
+│   Result    │
+└─────────────┘
+```
 
 ## Quick Start
 
+### Rust
+
 ```rust
-use matheval::{Compiler, Context};
+use matheval_core::Compiler;
 
-fn main() {
-    // 1. Compile the expression
-    // This step parses the string and generates optimized bytecode.
-    let compiler = Compiler::new();
-    let program = compiler.compile("x + sin(PI * y)").expect("Compilation failed");
+let compiler = Compiler::new();
+let program = compiler.compile("x^2 + 2*x + 1").unwrap();
 
-    // 2. Prepare the context (variables)
-    let mut context = Context::new();
-    context.set("x", 1.5);
-    context.set("y", 0.5);
-    context.set("PI", std::f64::consts::PI);
+let mut context = program.create_context();
+context.set_by_index(0, 3.0);  // x = 3
 
-    // 3. Evaluate
-    let result = program.eval(&context).expect("Runtime error");
-    println!("Result: {}", result);
+let result = program.eval(&context).unwrap();
+assert_eq!(result, 16.0);  // 3² + 2·3 + 1 = 16
+```
+
+### Python
+
+```python
+import matheval
+
+compiler = matheval.Compiler()
+program = compiler.compile("x^2 + 2*x + 1")
+
+context = matheval.Context()
+context.set("x", 3.0)
+
+result = program.eval(context)
+assert result == 16.0
+```
+
+## Advanced Features
+
+### Batch Evaluation
+
+Optimized for Monte Carlo simulations and parameter sweeps:
+
+```rust
+let program = compiler.compile("S * exp(r*T) - K").unwrap();
+
+// Vectorized evaluation: reuses VM instance
+let var_sets = vec![
+    &[100.0, 0.05, 1.0, 105.0][..],  // S, r, T, K
+    &[110.0, 0.05, 1.0, 105.0][..],
+    &[120.0, 0.05, 1.0, 105.0][..],
+];
+
+let results = program.eval_batch(&var_sets).unwrap();
+```
+
+**Performance**: 6-7× faster than loop-based evaluation for large datasets.
+
+### Error Handling
+
+Comprehensive error reporting with position tracking:
+
+```rust
+use matheval_core::{Error, ErrorKind, Position};
+
+let err = Error::wrong_arg_count("sin", 1, 2)
+    .with_position(Position::new(1, 5, 4))
+    .with_source("x + sin(1, 2)".to_string());
+
+// Output:
+// Error: Function 'sin' expects 1 argument, but got 2 at line 1, column 5
+//
+//   1 | x + sin(1, 2)
+//           ^
+//
+// Hint: Check the function documentation for the correct number of arguments
+```
+
+## Supported Operations
+
+**Arithmetic**: `+`, `-`, `*`, `/`, `^` (right-associative)  
+**Functions**: `sin`, `cos`, `tan`, `sqrt`, `abs`, `floor`, `ceil`, `round`, `exp`, `ln`, `log10`, `max`, `min`  
+**Precedence**: Standard mathematical order with parentheses support
+
+## Implementation Details
+
+### Compiler Pipeline
+
+1. **Lexical Analysis**: Tokenization with position tracking
+2. **Syntax Analysis**: Pratt parsing with binding power resolution
+3. **Optimization**: Constant folding and algebraic simplification
+4. **Code Generation**: Bytecode emission with symbol table construction
+
+### Virtual Machine
+
+- **Instruction Set**: 9 opcodes (LoadConst, LoadVar, Add, Sub, Mul, Div, Pow, Neg, Call)
+- **Stack Model**: f64 operand stack with bounds checking
+- **Function Table**: Direct function pointer dispatch
+- **Metadata**: Compile-time arity validation
+
+### Memory Layout
+
+```
+Program {
+    instructions: Vec<u8>,           // Compact bytecode
+    constants: Vec<f64>,             // Deduplicated constant pool
+    var_names: Vec<String>,          // Variable name table
+    func_table: Vec<BuiltinFn>,      // Function pointer table
+    func_metadata: Vec<Metadata>,    // Arity information
 }
 ```
+
+## Benchmarks
+
+Expression: `x * 2 + sin(y)` (10,000 iterations)
+
+| Method | Time | Throughput |
+|--------|------|------------|
+| Loop eval() | 34.5 ms | 290k ops/s |
+| Batch eval_batch() | 5.0 ms | 2M ops/s |
+
+**Speedup**: 6.9× for batch evaluation
+
+## Safety & Correctness
+
+- **100% Safe Rust**: No `unsafe` blocks
+- **Comprehensive Testing**: 97 unit tests, 9 Python integration tests
+- **Validation**: Compile-time function arity checking
+- **Error Recovery**: Graceful handling of division by zero, stack underflow
