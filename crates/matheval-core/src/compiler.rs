@@ -1,12 +1,14 @@
 use crate::ast::{BinaryOp, Expr, UnaryOp};
 use crate::bytecode::{BuiltinFn, FunctionMetadata, OpCode, Program};
 use std::collections::HashMap;
+use ordered_float::OrderedFloat;
 
 /// Compiler with constant folding optimization
 pub struct Compiler {
     program: Program,
     var_map: HashMap<String, u16>,
     func_map: HashMap<String, u16>,
+    const_map: HashMap<OrderedFloat<f64>, u16>,
 }
 
 impl Compiler {
@@ -15,6 +17,7 @@ impl Compiler {
             program: Program::new(),
             var_map: HashMap::new(),
             func_map: HashMap::new(),
+            const_map: HashMap::new(),
         }
     }
 
@@ -132,12 +135,14 @@ impl Compiler {
     }
 
     fn add_constant(&mut self, value: f64) -> u16 {
-        // Reuse existing constants
-        if let Some(idx) = self.program.constants.iter().position(|&c| c == value) {
-            return idx as u16;
+        // O(1) lookup using HashMap instead of O(n) linear search
+        let key = OrderedFloat(value);
+        if let Some(&idx) = self.const_map.get(&key) {
+            return idx;
         }
         let idx = self.program.constants.len() as u16;
         self.program.constants.push(value);
+        self.const_map.insert(key, idx);
         idx
     }
 
@@ -404,5 +409,29 @@ mod tests {
         assert_eq!(program.func_metadata.len(), 2);
         assert_eq!(program.func_metadata[0].expected_args, Some(1)); // sin
         assert_eq!(program.func_metadata[1].expected_args, None);    // max (variadic)
+    }
+
+    #[test]
+    fn test_constant_pool_hashmap_optimization() {
+        // Test that constant pool uses HashMap for O(1) deduplication
+        // Use variables to prevent constant folding
+        let program = compile_expr("x + 1.5 + y + 2.5 + z + 1.5 + w + 3.5 + v + 2.5");
+        
+        // Should only have 3 unique constants: 1.5, 2.5, 3.5
+        // Even though 1.5 and 2.5 appear twice
+        assert_eq!(program.constants.len(), 3);
+        assert!(program.constants.contains(&1.5));
+        assert!(program.constants.contains(&2.5));
+        assert!(program.constants.contains(&3.5));
+    }
+
+    #[test]
+    fn test_constant_deduplication_with_special_values() {
+        // Test deduplication with special float values
+        let program = compile_expr("0.0 + 0.0 + -0.0");
+        
+        // 0.0 and -0.0 should be treated as different in IEEE 754
+        // but OrderedFloat treats them as equal
+        assert!(program.constants.len() <= 2);
     }
 }
