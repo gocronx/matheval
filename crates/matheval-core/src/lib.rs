@@ -5,9 +5,11 @@ mod parser;
 mod bytecode;
 mod compiler;
 mod vm;
+mod error;
 
 pub use vm::Context;
 pub use bytecode::Program;
+pub use error::{Error, ErrorKind, Position};
 
 use lexer::Lexer;
 use parser::Parser;
