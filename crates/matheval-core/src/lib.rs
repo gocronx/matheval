@@ -237,6 +237,47 @@ mod tests {
     }
 
     #[test]
+    fn test_error_wrong_function_arg_count() {
+        let compiler = Compiler::new();
+        // sin expects 1 argument, but we're passing 2
+        let program = compiler.compile("sin(1, 2)").unwrap();
+        let result = program.eval(&Context::new());
+        
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("sin"));
+        assert!(err_msg.contains("expects 1"));
+        assert!(err_msg.contains("got 2"));
+    }
+
+    #[test]
+    fn test_error_sqrt_with_multiple_args() {
+        let compiler = Compiler::new();
+        let program = compiler.compile("sqrt(4, 9)").unwrap();
+        let result = program.eval(&Context::new());
+        
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("sqrt"));
+        assert!(err_msg.contains("expects 1"));
+    }
+
+    #[test]
+    fn test_variadic_functions_accept_any_args() {
+        let compiler = Compiler::new();
+        
+        // max and min are variadic, should accept any number of args
+        let program1 = compiler.compile("max(1)").unwrap();
+        assert!(program1.eval(&Context::new()).is_ok());
+        
+        let program2 = compiler.compile("max(1, 2, 3, 4, 5)").unwrap();
+        assert!(program2.eval(&Context::new()).is_ok());
+        
+        let program3 = compiler.compile("min(1, 2)").unwrap();
+        assert!(program3.eval(&Context::new()).is_ok());
+    }
+
+    #[test]
     fn test_compiler_default() {
         let compiler = Compiler::default();
         let program = compiler.compile("1 + 1").unwrap();

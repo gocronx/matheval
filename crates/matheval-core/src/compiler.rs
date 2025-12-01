@@ -1,5 +1,5 @@
 use crate::ast::{BinaryOp, Expr, UnaryOp};
-use crate::bytecode::{BuiltinFn, OpCode, Program};
+use crate::bytecode::{BuiltinFn, FunctionMetadata, OpCode, Program};
 use std::collections::HashMap;
 
 /// Compiler with constant folding optimization
@@ -157,28 +157,29 @@ impl Compiler {
         }
         let idx = self.program.func_names.len() as u16;
         
-        // Register built-in function
-        let func_ptr = match name.as_str() {
-            "sin" => builtin_sin as BuiltinFn,
-            "cos" => builtin_cos as BuiltinFn,
-            "tan" => builtin_tan as BuiltinFn,
-            "sqrt" => builtin_sqrt as BuiltinFn,
-            "abs" => builtin_abs as BuiltinFn,
-            "floor" => builtin_floor as BuiltinFn,
-            "ceil" => builtin_ceil as BuiltinFn,
-            "round" => builtin_round as BuiltinFn,
-            "exp" => builtin_exp as BuiltinFn,
-            "ln" => builtin_ln as BuiltinFn,
-            "log10" => builtin_log10 as BuiltinFn,
-            "max" => builtin_max as BuiltinFn,
-            "min" => builtin_min as BuiltinFn,
+        // Register built-in function with metadata
+        let (func_ptr, metadata) = match name.as_str() {
+            "sin" => (builtin_sin as BuiltinFn, FunctionMetadata::fixed(1)),
+            "cos" => (builtin_cos as BuiltinFn, FunctionMetadata::fixed(1)),
+            "tan" => (builtin_tan as BuiltinFn, FunctionMetadata::fixed(1)),
+            "sqrt" => (builtin_sqrt as BuiltinFn, FunctionMetadata::fixed(1)),
+            "abs" => (builtin_abs as BuiltinFn, FunctionMetadata::fixed(1)),
+            "floor" => (builtin_floor as BuiltinFn, FunctionMetadata::fixed(1)),
+            "ceil" => (builtin_ceil as BuiltinFn, FunctionMetadata::fixed(1)),
+            "round" => (builtin_round as BuiltinFn, FunctionMetadata::fixed(1)),
+            "exp" => (builtin_exp as BuiltinFn, FunctionMetadata::fixed(1)),
+            "ln" => (builtin_ln as BuiltinFn, FunctionMetadata::fixed(1)),
+            "log10" => (builtin_log10 as BuiltinFn, FunctionMetadata::fixed(1)),
+            "max" => (builtin_max as BuiltinFn, FunctionMetadata::variadic()),
+            "min" => (builtin_min as BuiltinFn, FunctionMetadata::variadic()),
             _ => {
                 // Unknown function - will error at runtime
-                builtin_unknown as BuiltinFn
+                (builtin_unknown as BuiltinFn, FunctionMetadata::variadic())
             }
         };
         
         self.program.func_table.push(func_ptr);
+        self.program.func_metadata.push(metadata);
         self.program.func_names.push(name.clone());
         self.func_map.insert(name, idx);
         idx
@@ -393,5 +394,15 @@ mod tests {
         let optimized = compiler.optimize_expr(expr);
         // Should not fold division by zero
         assert!(matches!(optimized, Expr::Binary { .. }));
+    }
+
+    #[test]
+    fn test_function_metadata_registration() {
+        let program = compile_expr("sin(x) + max(1, 2, 3)");
+        
+        // sin should have fixed(1), max should be variadic
+        assert_eq!(program.func_metadata.len(), 2);
+        assert_eq!(program.func_metadata[0].expected_args, Some(1)); // sin
+        assert_eq!(program.func_metadata[1].expected_args, None);    // max (variadic)
     }
 }

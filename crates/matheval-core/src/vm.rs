@@ -83,84 +83,106 @@ impl<'a> VM<'a> {
         }
 
         let var_values = context.values();
-        let instructions = &self.program.instructions;
-        let constants = &self.program.constants;
-        let func_table = &self.program.func_table;
-
-        let mut pc = 0; // Program counter
+        self.stack.clear();
         
-        while pc < instructions.len() {
-            let opcode = instructions[pc];
-            pc += 1;
-
-            match opcode {
-                op if op == OpCode::LoadConst as u8 => {
-                    let idx = self.read_u16(instructions, &mut pc);
-                    self.stack.push(constants[idx as usize]);
-                }
-                op if op == OpCode::LoadVar as u8 => {
-                    let idx = self.read_u16(instructions, &mut pc);
-                    self.stack.push(var_values[idx as usize]);
-                }
-                op if op == OpCode::Add as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(a + b);
-                }
-                op if op == OpCode::Sub as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(a - b);
-                }
-                op if op == OpCode::Mul as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(a * b);
-                }
-                op if op == OpCode::Div as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    if b == 0.0 {
-                        return Err("Division by zero".to_string());
-                    }
-                    self.stack.push(a / b);
-                }
-                op if op == OpCode::Pow as u8 => {
-                    let b = self.pop()?;
-                    let a = self.pop()?;
-                    self.stack.push(a.powf(b));
-                }
-                op if op == OpCode::Neg as u8 => {
-                    let a = self.pop()?;
-                    self.stack.push(-a);
-                }
-                op if op == OpCode::Call as u8 => {
-                    let func_idx = self.read_u16(instructions, &mut pc) as usize;
-                    let arg_count = instructions[pc] as usize;
-                    pc += 1;
-
-                    if func_idx >= func_table.len() {
-                        return Err(format!("Invalid function index: {}", func_idx));
-                    }
-
-                    // Read args directly from stack without allocation
-                    let stack_len = self.stack.len();
-                    if stack_len < arg_count {
-                        return Err("Stack underflow in function call".to_string());
-                    }
-                    
-                    let args_start = stack_len - arg_count;
-                    let result = func_table[func_idx](&self.stack[args_start..]);
-                    
-                    // Pop args and push result
-                    self.stack.truncate(args_start);
-                    self.stack.push(result);
-                }
-                _ => return Err(format!("Unknown opcode: {}", opcode)),
-            }
+        let mut pc = 0;
+        while pc < self.program.instructions.len() {
+            self.execute_instruction(&mut pc, var_values)?;
         }
 
         self.pop()
+    }
+
+    /// Execute a single instruction at the current program counter
+    /// This method is shared between run() and run_batch() to eliminate code duplication
+    #[inline]
+    fn execute_instruction(&mut self, pc: &mut usize, var_values: &[f64]) -> Result<(), String> {
+        let instructions = &self.program.instructions;
+        let constants = &self.program.constants;
+        let func_table = &self.program.func_table;
+        let func_metadata = &self.program.func_metadata;
+        
+        let opcode = instructions[*pc];
+        *pc += 1;
+
+        match opcode {
+            op if op == OpCode::LoadConst as u8 => {
+                let idx = self.read_u16(instructions, pc);
+                self.stack.push(constants[idx as usize]);
+            }
+            op if op == OpCode::LoadVar as u8 => {
+                let idx = self.read_u16(instructions, pc);
+                self.stack.push(var_values[idx as usize]);
+            }
+            op if op == OpCode::Add as u8 => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                self.stack.push(a + b);
+            }
+            op if op == OpCode::Sub as u8 => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                self.stack.push(a - b);
+            }
+            op if op == OpCode::Mul as u8 => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                self.stack.push(a * b);
+            }
+            op if op == OpCode::Div as u8 => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                if b == 0.0 {
+                    return Err("Division by zero".to_string());
+                }
+                self.stack.push(a / b);
+            }
+            op if op == OpCode::Pow as u8 => {
+                let b = self.pop()?;
+                let a = self.pop()?;
+                self.stack.push(a.powf(b));
+            }
+            op if op == OpCode::Neg as u8 => {
+                let a = self.pop()?;
+                self.stack.push(-a);
+            }
+            op if op == OpCode::Call as u8 => {
+                let func_idx = self.read_u16(instructions, pc) as usize;
+                let arg_count = instructions[*pc] as usize;
+                *pc += 1;
+
+                if func_idx >= func_table.len() {
+                    return Err(format!("Invalid function index: {}", func_idx));
+                }
+
+                // Validate argument count
+                if let Some(expected) = func_metadata[func_idx].expected_args {
+                    if arg_count != expected {
+                        let func_name = &self.program.func_names[func_idx];
+                        return Err(format!(
+                            "Function '{}' expects {} argument(s), got {}",
+                            func_name, expected, arg_count
+                        ));
+                    }
+                }
+
+                // Read args directly from stack without allocation
+                let stack_len = self.stack.len();
+                if stack_len < arg_count {
+                    return Err("Stack underflow in function call".to_string());
+                }
+                
+                let args_start = stack_len - arg_count;
+                let result = func_table[func_idx](&self.stack[args_start..]);
+                
+                // Pop args and push result
+                self.stack.truncate(args_start);
+                self.stack.push(result);
+            }
+            _ => return Err(format!("Unknown opcode: {}", opcode)),
+        }
+        
+        Ok(())
     }
 
     #[inline]
@@ -213,79 +235,9 @@ impl<'a> VM<'a> {
             // Reset stack for each evaluation
             self.stack.clear();
 
-            let instructions = &self.program.instructions;
-            let constants = &self.program.constants;
-            let func_table = &self.program.func_table;
-
             let mut pc = 0;
-
-            while pc < instructions.len() {
-                let opcode = instructions[pc];
-                pc += 1;
-
-                match opcode {
-                    op if op == OpCode::LoadConst as u8 => {
-                        let idx = self.read_u16(instructions, &mut pc);
-                        self.stack.push(constants[idx as usize]);
-                    }
-                    op if op == OpCode::LoadVar as u8 => {
-                        let idx = self.read_u16(instructions, &mut pc);
-                        self.stack.push(var_values[idx as usize]);
-                    }
-                    op if op == OpCode::Add as u8 => {
-                        let b = self.pop()?;
-                        let a = self.pop()?;
-                        self.stack.push(a + b);
-                    }
-                    op if op == OpCode::Sub as u8 => {
-                        let b = self.pop()?;
-                        let a = self.pop()?;
-                        self.stack.push(a - b);
-                    }
-                    op if op == OpCode::Mul as u8 => {
-                        let b = self.pop()?;
-                        let a = self.pop()?;
-                        self.stack.push(a * b);
-                    }
-                    op if op == OpCode::Div as u8 => {
-                        let b = self.pop()?;
-                        let a = self.pop()?;
-                        if b == 0.0 {
-                            return Err("Division by zero".to_string());
-                        }
-                        self.stack.push(a / b);
-                    }
-                    op if op == OpCode::Pow as u8 => {
-                        let b = self.pop()?;
-                        let a = self.pop()?;
-                        self.stack.push(a.powf(b));
-                    }
-                    op if op == OpCode::Neg as u8 => {
-                        let a = self.pop()?;
-                        self.stack.push(-a);
-                    }
-                    op if op == OpCode::Call as u8 => {
-                        let func_idx = self.read_u16(instructions, &mut pc) as usize;
-                        let arg_count = instructions[pc] as usize;
-                        pc += 1;
-
-                        if func_idx >= func_table.len() {
-                            return Err(format!("Invalid function index: {}", func_idx));
-                        }
-
-                        let stack_len = self.stack.len();
-                        if stack_len < arg_count {
-                            return Err("Stack underflow in function call".to_string());
-                        }
-
-                        let args_start = stack_len - arg_count;
-                        let result = func_table[func_idx](&self.stack[args_start..]);
-
-                        self.stack.truncate(args_start);
-                        self.stack.push(result);
-                    }
-                    _ => return Err(format!("Unknown opcode: {}", opcode)),
-                }
+            while pc < self.program.instructions.len() {
+                self.execute_instruction(&mut pc, var_values)?;
             }
 
             results.push(self.pop()?);
@@ -417,6 +369,8 @@ mod tests {
 
     #[test]
     fn test_vm_function_call() {
+        use crate::bytecode::FunctionMetadata;
+        
         fn test_max(args: &[f64]) -> f64 {
             args.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b))
         }
@@ -426,6 +380,7 @@ mod tests {
         program.constants.push(2.0);
         program.constants.push(5.0);
         program.func_table.push(test_max);
+        program.func_metadata.push(FunctionMetadata::variadic()); // max is variadic
         
         program.instructions.push(OpCode::LoadConst as u8);
         program.instructions.extend_from_slice(&[0, 0]);

@@ -19,6 +19,27 @@ pub enum OpCode {
 /// Function signature for built-in functions
 pub type BuiltinFn = fn(&[f64]) -> f64;
 
+/// Metadata for function validation
+#[derive(Debug, Clone, Copy)]
+pub struct FunctionMetadata {
+    /// Expected number of arguments (None = variadic)
+    pub expected_args: Option<usize>,
+}
+
+impl FunctionMetadata {
+    pub fn new(expected_args: Option<usize>) -> Self {
+        Self { expected_args }
+    }
+    
+    pub fn fixed(count: usize) -> Self {
+        Self { expected_args: Some(count) }
+    }
+    
+    pub fn variadic() -> Self {
+        Self { expected_args: None }
+    }
+}
+
 /// Compiled program with optimized bytecode
 #[derive(Clone)]
 pub struct Program {
@@ -36,6 +57,9 @@ pub struct Program {
     
     /// Function names for debugging
     pub func_names: Vec<String>,
+    
+    /// Function metadata for validation
+    pub func_metadata: Vec<FunctionMetadata>,
 }
 
 impl Program {
@@ -46,6 +70,7 @@ impl Program {
             var_names: Vec::new(),
             func_table: Vec::new(),
             func_names: Vec::new(),
+            func_metadata: Vec::new(),
         }
     }
 }
